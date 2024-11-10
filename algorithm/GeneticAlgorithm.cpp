@@ -35,7 +35,7 @@ void GeneticAlgorithm::run_parallel() {
 
 
     Population p = createBasePopulation();
-    p.process_parallel();
+    p.process_serial();
     generations.push_back(p);
 
     double fitness = 0.001;
