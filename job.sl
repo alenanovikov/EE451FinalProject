@@ -11,4 +11,4 @@
 module purge
 module load nvidia-hpc-sdk
 
-./main
+./GeneticAlgorithm
