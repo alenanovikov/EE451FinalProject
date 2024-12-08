@@ -2,6 +2,7 @@
 #include <fstream>
 #include "GeneticAlgorithm.h"
 
+// Serial version without OpenMP 
 void GeneticAlgorithm::run_serial() {
 
 
@@ -26,28 +27,27 @@ void GeneticAlgorithm::run_serial() {
      }
 
     generations.back().printBestCandidate();
-
-    //resultToFile();
     resultAsJson();
 }
 
+// Parallel version using OpenMP
 void GeneticAlgorithm::run_parallel() {
-
-
+    // create random base popuolation
     Population p = createBasePopulation();
-    p.process_serial();
+    // sort foldings according to their firness score
+    p.process_parallel();
+    // add this configuration
     generations.push_back(p);
 
     double fitness = 0.001;
     int generation = 0;
 
     while(generation < params.generations){
-        //p.printChromos();
         generation++;
-        p = p.tournament_selection(generation);
-        p.crossover_selection_parallel(params.crossoverPercent);
-        p.mutation_parallel(params.mutationPercent);
-        p.process_parallel();
+        p = p.tournament_selection(generation); // shuffle chromosomes
+        p.crossover_selection_parallel(params.crossoverPercent); // crossover
+        p.mutation_parallel(params.mutationPercent); // mutate random chromosomes
+        p.process_parallel(); // recalculate fitness
 
         p.calcDiversity_parallel();
 
@@ -55,8 +55,6 @@ void GeneticAlgorithm::run_parallel() {
      }
 
     generations.back().printBestCandidate();
-
-    //resultToFile();
     resultAsJson();
 }
 

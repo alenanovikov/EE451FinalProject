@@ -5,6 +5,7 @@
 #include <iostream>
 #include <functional>
 #include "Population.h"
+#include <algorithm>
 #include <omp.h> // Include OpenMP header
 
 
@@ -57,48 +58,12 @@ Population Population::tournament_selection(int generation) {
 
         --t_rounds;
     }
-
-/*
-    static const float t = 0.6f;
-    std::uniform_int_distribution<int> uniform_dist(0, chromosomes.size());
-
-    for (size_t i = 0; i < chromosomes.size(); ++i) {
-        Chromosome* c1 = nullptr;
-        while (!c1){
-            int index = uniform_dist(randomEngine) - 1;
-
-            Chromosome& c = chromosomes[index];
-            if (&c != c1) {
-                c1 = &c;
-            }
-        }
-
-        Chromosome* c2 = nullptr;
-        while (!c2) {
-            int index = uniform_dist(randomEngine) - 1;
-            Chromosome& c = chromosomes[index];
-            if (&c != c2) {
-                c2 = &c;
-            }
-        }
-
-
-
-        float r = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
-        if (r >= t) {
-            winner = *c2;
-        }
-
-        new_chromosomes.push_back(std::move(winner));
-
-    }
-*/
     return Population(new_chromosomes);
 
  }
 
 
-
+/* Serial version */
 void Population::crossover_selection_serial(double crossover_rate) {
 
     // 0.25 der chromosome.
@@ -124,40 +89,27 @@ void Population::crossover_selection_serial(double crossover_rate) {
         --left;
     }
 
-  /*  for(auto it = chromosomes.begin(); it < current; it +=2) {
-        Chromosome& ch1 = (*(it));
-        Chromosome& ch2 = *(it +1);
-        ch1.crossover(ch2);
-    }*/
-
 }
-
+/* Parallel version */
 void Population::crossover_selection_parallel(double crossover_rate) {
+    int num_chromosomes = chromosomes.size();
+    int crossover_count = static_cast<int>(num_chromosomes * crossover_rate);
 
-    // 0.25 der chromosome.
-    //Fisher-Yates shuffle
-    int crossover_count = (int) (chromosomes.size() * crossover_rate );
-    //std::cout << crossover_count << std::endl;
+    // Ensure crossover_count is even and does not exceed half of the population
+    crossover_count = std::min(crossover_count - (crossover_count % 2), (num_chromosomes / 2) * 2);
 
-    long left = std::distance(chromosomes.begin(), chromosomes.end());
-    auto current = chromosomes.begin();
+    // Shuffle the chromosomes
+    std::random_device rd;
+    std::mt19937 rng(rd());
+    std::shuffle(chromosomes.begin(), chromosomes.end(), rng);
 
+    // Perform crossover on the first crossover_count chromosomes
     #pragma omp parallel for
-    for (int i=0; i<crossover_count; i++) {
-        auto r = current;
-        std::advance(r, rand()%left);
-        //std::swap(*current, *r);
-        Chromosome& ch1 = (*(current));
-        Chromosome& ch2 = (*(r));
-
-        if(ch1.id != ch2.id){
-            ch1.crossover(ch2);
-            --crossover_count;
-        }
-        ++current;
-        --left;
+    for (int i = 0; i < crossover_count; i += 2) {
+        Chromosome& ch1 = chromosomes[i];
+        Chromosome& ch2 = chromosomes[i + 1];
+        ch1.crossover(ch2);
     }
-
 }
 
 void Population::mutation_serial(double mutation_rate) {
@@ -191,7 +143,7 @@ void Population::mutation_parallel(double mutation_rate) {
     long size = chromosomes.size();
     auto current = chromosomes.begin();
     #pragma omp parallel for
-    for (int i=0; i<mutation_count; i++) {
+    for (int i=0; i<(int)mutation_count; i++) {
         auto r = current;
         std::advance(r, rand()%size);
         (*(r)).mutate();
@@ -228,21 +180,38 @@ void Population::process_serial() {
 }
 
 void Population::process_parallel() {
-
     double totalFitness = 0;
-    // re-calculate changed chromosomes
-    #pragma omp parallel for
-    for (Chromosome& chromo : chromosomes){
-        chromo.process();
-        totalFitness += chromo.getFitness();
-    }
-    // sort list by fitness
-    std::sort(chromosomes.rbegin(), chromosomes.rend());
-    // calculate min/max fitness of population
+    double minFitnessLocal = std::numeric_limits<double>::max();
+    double maxFitnessLocal = std::numeric_limits<double>::lowest();
 
-    minFitness = chromosomes.back().getFitness();
-    maxFitness = chromosomes.front().getFitness();
-    averageFitness = totalFitness/chromosomes.size();
+    // Recalculate changed chromosomes
+    #pragma omp parallel for reduction(+:totalFitness) reduction(min:minFitnessLocal) reduction(max:maxFitnessLocal)
+    for (int i = 0; i < chromosomes.size(); ++i) {
+        Chromosome& chromo = chromosomes[i];
+        chromo.process();
+
+        double fitness = chromo.getFitness();
+        totalFitness += fitness;
+
+        // Update local min and max fitness
+        if (fitness < minFitnessLocal) {
+            minFitnessLocal = fitness;
+        }
+        if (fitness > maxFitnessLocal) {
+            maxFitnessLocal = fitness;
+        }
+    }
+
+    // Update class members with the results
+    minFitness = minFitnessLocal;
+    maxFitness = maxFitnessLocal;
+    averageFitness = totalFitness / chromosomes.size();
+
+    // Sort chromosomes by fitness
+    std::sort(chromosomes.begin(), chromosomes.end(),
+              [](const Chromosome& a, const Chromosome& b) {
+                  return a.getFitness() > b.getFitness();
+              });
 }
 
 void Population::printBestCandidate() {
